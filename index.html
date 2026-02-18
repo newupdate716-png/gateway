@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💎 PREMIUM SMS MONITOR DASHBOARD</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ==================== PREMIUM STYLES ==================== */
+        :root {
+            --primary: #8B5CF6;
+            --secondary: #10B981;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --info: #3B82F6;
+            --dark: #1F2937;
+            --light: #F9FAFB;
+            --gray: #6B7280;
+            --border: #E5E7EB;
+            --bkash: #E2136E;
+            --nagad: #F8A61C;
+            --rocket: #4CAF50;
+            --bank: #3B82F6;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--dark);
+            line-height: 1.6;
+        }
+        
+        .dashboard {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        /* Header */
+        .header {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px 30px;
+            margin-bottom: 25px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            animation: slideDown 0.5s ease;
+        }
+        
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .logo {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, var(--primary), #7C3AED);
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 32px;
+            box-shadow: 0 10px 20px rgba(139, 92, 246, 0.3);
+        }
+        
+        .title h1 {
+            font-size: 32px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), #7C3AED);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .badge {
+            background: linear-gradient(135deg, var(--secondary), #059669);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: 700;
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.3);
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            animation: fadeInUp 0.5s ease;
+        }
+        
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+        
+        .stat-icon {
+            width: 70px;
+            height: 70px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin-bottom: 20px;
+            color: white;
+        }
+        
+        .stat-icon.blue { background: linear-gradient(135deg, #3B82F6, #1D4ED8); }
+        .stat-icon.green { background: linear-gradient(135deg, #10B981, #059669); }
+        .stat-icon.purple { background: linear-gradient(135deg, #8B5CF6, #7C3AED); }
+        .stat-icon.orange { background: linear-gradient(135deg, #F59E0B, #D97706); }
+        
+        .stat-value {
+            font-size: 42px;
+            font-weight: 800;
+            color: var(--dark);
+            margin-bottom: 5px;
+        }
+        
+        /* Transactions Table */
+        .main-content {
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        }
+        
+        .transactions-table {
+            overflow-x: auto;
+            border-radius: 15px;
+            border: 1px solid var(--border);
+            background: white;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            background: linear-gradient(135deg, #F3F4F6, #E5E7EB);
+            padding: 18px 20px;
+            font-weight: 700;
+            color: var(--dark);
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        td {
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        tr:hover {
+            background: #F3F4F6;
+        }
+        
+        .service-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 700;
+            color: white;
+        }
+        
+        .bkash { background: #E2136E; }
+        .nagad { background: #F8A61C; }
+        .rocket { background: #4CAF50; }
+        .bank { background: #3B82F6; }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        
+        .status-pending { background: #FEF3C7; color: #92400E; }
+        .status-completed { background: #D1FAE5; color: #065F46; }
+        
+        .view-btn {
+            background: linear-gradient(135deg, var(--primary), #7C3AED);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .view-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(139, 92, 246, 0.3);
+        }
+        
+        /* Loading Animation */
+        .loading {
+            text-align: center;
+            padding: 50px;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Real-time Update Indicator */
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(239, 68, 68, 0.1);
+            color: #EF4444;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .live-dot {
+            width: 10px;
+            height: 10px;
+            background: #EF4444;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <div class="header-left" style="display: flex; align-items: center; gap: 20px;">
+                <div class="logo">
+                    <i class="fas fa-sms"></i>
+                </div>
+                <div class="title">
+                    <h1>💎 PREMIUM SMS MONITOR</h1>
+                    <p style="color: var(--gray); display: flex; align-items: center; gap: 15px;">
+                        <span><i class="fas fa-shield-alt"></i> Enterprise Grade</span>
+                        <span class="live-indicator">
+                            <span class="live-dot"></span> LIVE
+                        </span>
+                    </p>
+                </div>
+            </div>
+            <div class="badge">
+                <i class="fas fa-crown"></i> PREMIUM
+            </div>
+        </div>
+
+        <!-- Stats will be loaded here dynamically -->
+        <div class="stats-grid" id="statsContainer">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading dashboard...</p>
+            </div>
+        </div>
+
+        <!-- Transactions will be loaded here -->
+        <div class="main-content" id="transactionsContainer">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading transactions...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction Details Modal -->
+    <div class="modal-overlay" id="transactionModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 20px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+            <div style="padding: 30px;" id="modalContent">
+                <!-- Content will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = window.location.origin;
+        
+        // Load dashboard data
+        async function loadDashboard() {
+            try {
+                // Fetch statistics
+                const statsResponse = await fetch(`${API_BASE}/api/sms`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'get_stats' })
+                });
+                
+                if (!statsResponse.ok) throw new Error('Failed to fetch stats');
+                const data = await statsResponse.json();
+                
+                // Render stats
+                renderStats(data);
+                
+                // Render transactions
+                renderTransactions(data.recent_transactions);
+                
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                document.getElementById('statsContainer').innerHTML = `
+                    <div style="grid-column: 1/-1; text-align: center; padding: 50px; background: white; border-radius: 20px;">
+                        <i class="fas fa-exclamation-triangle" style="font-size: 50px; color: #EF4444; margin-bottom: 20px;"></i>
+                        <h3 style="color: #EF4444;">Failed to load dashboard</h3>
+                        <p>Please check your connection and try again.</p>
+                    </div>
+                `;
+            }
+        }
+        
+        function renderStats(data) {
+            const statsHtml = `
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <i class="fas fa-exchange-alt"></i>
+                    </div>
+                    <div class="stat-title">TOTAL TRANSACTIONS</div>
+                    <div class="stat-value">${data.total_transactions || 0}</div>
+                    <div class="stat-subtitle">All time transactions</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon orange">
+                        <i class="fas fa-hourglass-half"></i>
+                    </div>
+                    <div class="stat-title">PENDING</div>
+                    <div class="stat-value">${data.pending_transactions || 0}</div>
+                    <div class="stat-subtitle">Awaiting verification</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="stat-title">COMPLETED</div>
+                    <div class="stat-value">${data.completed_transactions || 0}</div>
+                    <div class="stat-subtitle">Verified transactions</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon purple">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="stat-title">TODAY'S</div>
+                    <div class="stat-value">${data.today_transactions || 0}</div>
+                    <div class="stat-subtitle">Transactions today</div>
+                </div>
+            `;
+            
+            document.getElementById('statsContainer').innerHTML = statsHtml;
+        }
+        
+        function renderTransactions(transactions) {
+            if (!transactions || transactions.length === 0) {
+                document.getElementById('transactionsContainer').innerHTML = `
+                    <div style="text-align: center; padding: 60px;">
+                        <i class="fas fa-inbox" style="font-size: 80px; color: #E5E7EB; margin-bottom: 20px;"></i>
+                        <h3 style="color: var(--gray);">No transactions yet</h3>
+                        <p style="color: var(--gray);">Waiting for SMS from your Android app...</p>
+                        <div style="margin-top: 30px; padding: 20px; background: #F3F4F6; border-radius: 10px;">
+                            <p><strong>API Endpoint Ready:</strong></p>
+                            <code style="background: white; padding: 10px; display: block; margin-top: 10px;">
+                                POST ${API_BASE}/api/sms
+                            </code>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            let tableHtml = `
+                <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="font-size: 24px;"><i class="fas fa-list"></i> Recent Transactions</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" placeholder="Search..." id="searchInput" style="padding: 10px 15px; border: 2px solid var(--border); border-radius: 10px;">
+                    </div>
+                </div>
+                <div class="transactions-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Service</th>
+                                <th>Transaction ID</th>
+                                <th>Amount</th>
+                                <th>Sender</th>
+                                <th>Time</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            transactions.forEach(t => {
+                const serviceClass = (t.service_type || 'other').toLowerCase();
+                const statusClass = (t.status || 'pending').toLowerCase();
+                
+                tableHtml += `
+                    <tr>
+                        <td>
+                            <span class="status-badge status-${statusClass}">
+                                <i class="fas fa-${statusClass === 'completed' ? 'check-circle' : 'hourglass-half'}"></i>
+                                ${t.status || 'PENDING'}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="service-badge ${serviceClass}">
+                                <i class="fas fa-${serviceClass === 'bkash' ? 'mobile-alt' : serviceClass === 'nagad' ? 'wallet' : serviceClass === 'rocket' ? 'rocket' : 'university'}"></i>
+                                ${t.service_type || 'Other'}
+                            </span>
+                        </td>
+                        <td><strong>${t.transaction_id || 'N/A'}</strong></td>
+                        <td><strong style="color: #10B981; font-size: 18px;">৳${t.amount || '0'}</strong></td>
+                        <td>${t.sender || 'N/A'}</td>
+                        <td>${new Date(t.timestamp).toLocaleString()}</td>
+                        <td>
+                            <button class="view-btn" onclick="viewTransaction('${t.id}')">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            document.getElementById('transactionsContainer').innerHTML = tableHtml;
+            
+            // Add search functionality
+            document.getElementById('searchInput')?.addEventListener('input', function(e) {
+                const searchTerm = e.target.value.toLowerCase();
+                document.querySelectorAll('#transactionsContainer tbody tr').forEach(row => {
+                    const text = row.textContent.toLowerCase();
+                    row.style.display = text.includes(searchTerm) ? '' : 'none';
+                });
+            });
+        }
+        
+        async function viewTransaction(transactionId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/sms`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'get_stats' })
+                });
+                
+                const data = await response.json();
+                const transaction = data.recent_transactions.find(t => t.id === transactionId);
+                
+                if (!transaction) return;
+                
+                const modalContent = document.getElementById('modalContent');
+                modalContent.innerHTML = `
+                    <h2 style="margin-bottom: 20px;"><i class="fas fa-receipt"></i> Transaction Details</h2>
+                    <div style="display: grid; gap: 15px;">
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>Status:</strong>
+                            <span class="status-badge status-${(transaction.status || 'pending').toLowerCase()}">${transaction.status || 'PENDING'}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>Service:</strong>
+                            <span>${transaction.service_type || 'N/A'}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>Transaction ID:</strong>
+                            <span style="font-family: monospace;">${transaction.transaction_id || 'N/A'}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>Amount:</strong>
+                            <span style="color: #10B981; font-size: 20px; font-weight: bold;">৳${transaction.amount || '0'}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>Sender:</strong>
+                            <span>${transaction.sender || 'N/A'}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>Time:</strong>
+                            <span>${new Date(transaction.timestamp).toLocaleString()}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #E5E7EB;">
+                            <strong>SIM Info:</strong>
+                            <span>${transaction.sim_info || 'N/A'}</span>
+                        </div>
+                    </div>
+                    <div style="margin-top: 30px; background: #F3F4F6; padding: 20px; border-radius: 10px;">
+                        <h3 style="margin-bottom: 10px;"><i class="fas fa-sms"></i> Original Message</h3>
+                        <p style="font-family: monospace; white-space: pre-wrap;">${transaction.original_message || 'No message'}</p>
+                    </div>
+                    <button onclick="document.getElementById('transactionModal').style.display='none'" style="margin-top: 20px; width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: 600;">Close</button>
+                `;
+                
+                document.getElementById('transactionModal').style.display = 'flex';
+                
+            } catch (error) {
+                console.error('Error loading transaction:', error);
+            }
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('transactionModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+        
+        // Load dashboard on page load
+        document.addEventListener('DOMContentLoaded', loadDashboard);
+        
+        // Auto refresh every 10 seconds
+        setInterval(loadDashboard, 10000);
+    </script>
+</body>
+</html> 
