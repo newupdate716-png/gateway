@@ -1,7 +1,10 @@
 {
   "name": "sms-monitor-api",
   "version": "1.0.0",
+  "description": "SMS Monitor API with file-based storage",
+  "main": "api/sms.js",
   "dependencies": {
-    "@vercel/kv": "^1.0.0"
+    "fs": "0.0.1-security",
+    "path": "^0.12.7"
   }
-} 
+}
