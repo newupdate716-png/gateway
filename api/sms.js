@@ -1,38 +1,59 @@
-// ==================== API ENDPOINT FOR SMS RECEIVING ====================
+// ==================== SMS API ENDPOINT (FIXED VERSION) ====================
 // This file handles POST requests from your Android app
 // File location: /api/sms.js
 
 export default async function handler(req, res) {
-    // Enable CORS
+    // Enable CORS for all requests
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours cache
 
-    // Handle preflight OPTIONS request
+    // Handle preflight OPTIONS request (important for Android)
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
+
+    // Log all requests for debugging
+    console.log('Request received:', {
+        method: req.method,
+        body: req.body,
+        query: req.query,
+        headers: req.headers
+    });
 
     // Only accept POST requests from Android app
     if (req.method !== 'POST') {
         return res.status(405).json({ 
             success: false, 
-            error: 'Method not allowed. Please use POST.' 
+            error: 'Method not allowed. Please use POST.',
+            method_received: req.method
         });
     }
 
     try {
-        const { action, data, sms_data, service, amount, txid } = req.body;
+        // Get parameters from either body or query string
+        const action = req.body?.action || req.query?.action;
+        const data = req.body?.data || req.query?.data;
+        const sms_data = req.body?.sms_data || req.query?.sms_data;
+        const service = req.body?.service || req.query?.service;
+        const amount = req.body?.amount || req.query?.amount;
+        const txid = req.body?.txid || req.query?.txid;
 
-        // Validate API key or password (optional but recommended)
-        // const apiKey = req.headers['x-api-key'];
-        // if (apiKey !== 'YOUR_SECRET_KEY') {
-        //     return res.status(401).json({ success: false, error: 'Unauthorized' });
-        // }
+        console.log('Parsed parameters:', { action, data, sms_data, service, amount, txid });
 
-        // Initialize or get database from Vercel KV (if using)
-        // For demo, we'll use in-memory storage (Vercel KV recommended for production)
-        
+        if (!action) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing action parameter',
+                received_body: req.body,
+                received_query: req.query
+            });
+        }
+
+        // Initialize database
+        const db = await initDatabase();
+
         switch(action) {
             case 'save_transaction':
                 if (!data) {
@@ -42,14 +63,22 @@ export default async function handler(req, res) {
                     });
                 }
                 
-                const transactionData = JSON.parse(data);
-                const savedTransaction = await saveTransaction(transactionData);
+                let transactionData;
+                try {
+                    transactionData = JSON.parse(decodeURIComponent(data));
+                } catch (e) {
+                    transactionData = JSON.parse(data); // Try without decoding
+                }
+                
+                console.log('Saving transaction:', transactionData);
+                const savedTransaction = await saveTransaction(db, transactionData);
                 
                 return res.status(200).json({
                     success: true,
                     message: 'Transaction saved successfully',
                     transaction_id: savedTransaction.transaction_id,
-                    status: 'PENDING'
+                    status: 'PENDING',
+                    id: savedTransaction.id
                 });
 
             case 'save_backup':
@@ -60,7 +89,8 @@ export default async function handler(req, res) {
                     });
                 }
                 
-                await saveBackupSMS(sms_data);
+                const decodedSms = decodeURIComponent(sms_data);
+                await saveBackupSMS(db, decodedSms);
                 return res.status(200).json({
                     success: true,
                     message: 'Backup SMS saved'
@@ -74,7 +104,7 @@ export default async function handler(req, res) {
                     });
                 }
                 
-                const verification = await verifyTransaction(service, amount, txid);
+                const verification = await verifyTransaction(db, service, amount, txid);
                 return res.status(200).json(verification);
 
             case 'verify_payment_without_txid':
@@ -85,72 +115,223 @@ export default async function handler(req, res) {
                     });
                 }
                 
-                const verificationNoTxid = await verifyTransactionWithoutTxid(service, amount);
+                const verificationNoTxid = await verifyTransactionWithoutTxid(db, service, amount);
                 return res.status(200).json(verificationNoTxid);
 
             case 'get_stats':
-                const stats = await getStatistics();
+                const stats = await getStatistics(db);
                 return res.status(200).json(stats);
+
+            case 'clear_database':
+                await clearDatabase();
+                return res.status(200).json({ 
+                    success: true, 
+                    message: 'Database cleared successfully' 
+                });
 
             default:
                 return res.status(400).json({ 
                     success: false, 
-                    error: 'Invalid action' 
+                    error: 'Invalid action',
+                    valid_actions: [
+                        'save_transaction',
+                        'save_backup',
+                        'verify_payment',
+                        'verify_payment_without_txid',
+                        'get_stats',
+                        'clear_database'
+                    ]
                 });
         }
     } catch (error) {
         console.error('API Error:', error);
         return res.status(500).json({ 
             success: false, 
-            error: 'Internal server error: ' + error.message 
+            error: 'Internal server error: ' + error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 }
 
 // ==================== DATABASE FUNCTIONS ====================
-// For production, use Vercel KV (Redis) or MongoDB
-// This is a simple file-based storage for demonstration
+// Using Vercel KV (Redis) for production, fallback to in-memory for development
 
-const fs = require('fs');
-const path = require('path');
+let memoryDB = null;
 
-const DATA_FILE = path.join('/tmp', 'sms_database.json'); // Vercel has writable /tmp directory
-
-function readDatabase() {
-    try {
-        if (fs.existsSync(DATA_FILE)) {
-            const data = fs.readFileSync(DATA_FILE, 'utf8');
-            return JSON.parse(data);
-        }
-    } catch (error) {
-        console.error('Error reading database:', error);
+async function initDatabase() {
+    // Check if Vercel KV is configured
+    if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+        console.log('Using Vercel KV for storage');
+        return { type: 'kv' };
     }
     
-    // Default database structure
-    return {
-        transactions: [],
-        backup_sms: [],
-        stats: {
+    // Fallback to in-memory storage
+    console.log('Using in-memory storage (data will reset on each deploy)');
+    if (!memoryDB) {
+        memoryDB = {
+            transactions: [],
+            backup_sms: [],
+            stats: {
+                total_transactions: 0,
+                today_transactions: 0,
+                total_amount: '0.00',
+                pending_transactions: 0,
+                completed_transactions: 0,
+                service_distribution: {}
+            }
+        };
+    }
+    return { type: 'memory', db: memoryDB };
+}
+
+async function saveTransaction(db, transactionData) {
+    const newTransaction = {
+        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        sender: transactionData.sender || '',
+        amount: transactionData.amount || '',
+        transaction_id: transactionData.transaction_id || '',
+        account_number: transactionData.account_number || '',
+        reference: transactionData.reference || '',
+        service_type: transactionData.service_type || 'Other',
+        transaction_type: transactionData.transaction_type || 'Unknown',
+        timestamp: new Date().toISOString(),
+        sim_info: transactionData.sim_info || '',
+        original_message: transactionData.original_message || '',
+        ip_address: '0.0.0.0',
+        status: 'PENDING',
+        verified_at: null,
+        verified_by: null
+    };
+    
+    if (db.type === 'memory') {
+        db.db.transactions.unshift(newTransaction);
+        updateStats(db.db);
+    }
+    
+    return newTransaction;
+}
+
+async function saveBackupSMS(db, smsData) {
+    if (db.type === 'memory') {
+        db.db.backup_sms.unshift({
+            id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+            sms_data: smsData,
+            timestamp: new Date().toISOString(),
+            ip_address: '0.0.0.0'
+        });
+        if (db.db.backup_sms.length > 100) db.db.backup_sms.pop();
+    }
+    return true;
+}
+
+async function verifyTransaction(db, service, amount, txid) {
+    if (db.type !== 'memory') return { success: false, error: 'Database not ready' };
+    
+    const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')).toString();
+
+    const transaction = db.db.transactions.find(t => 
+        t.status === 'PENDING' &&
+        t.service_type?.toLowerCase() === service.toLowerCase() &&
+        t.transaction_id === txid &&
+        parseFloat(t.amount?.toString().replace(/[^0-9.]/g, '') || '0').toString() === cleanAmount
+    );
+
+    if (transaction) {
+        transaction.status = 'COMPLETED';
+        transaction.verified_at = new Date().toISOString();
+        transaction.verified_by = 'API';
+        updateStats(db.db);
+        return {
+            success: true,
+            matched_records: 1,
+            message: 'Transaction verified and marked as COMPLETED',
+            status: 'COMPLETED'
+        };
+    } else {
+        const existing = db.db.transactions.find(t => 
+            t.service_type?.toLowerCase() === service.toLowerCase() &&
+            t.transaction_id === txid
+        );
+
+        if (existing) {
+            return {
+                success: false,
+                error: 'TRANSACTION_NOT_PENDING',
+                message: 'Transaction found but not in PENDING state',
+                status: existing.status
+            };
+        } else {
+            return {
+                success: false,
+                error: 'NO_MATCH',
+                message: 'No matching PENDING transaction found'
+            };
+        }
+    }
+}
+
+async function verifyTransactionWithoutTxid(db, service, amount) {
+    if (db.type !== 'memory') return { success: false, error: 'Database not ready' };
+    
+    const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')).toString();
+
+    const transaction = db.db.transactions.find(t => 
+        t.status === 'PENDING' &&
+        t.service_type?.toLowerCase() === service.toLowerCase() &&
+        parseFloat(t.amount?.toString().replace(/[^0-9.]/g, '') || '0').toString() === cleanAmount
+    );
+
+    if (transaction) {
+        transaction.status = 'COMPLETED';
+        transaction.verified_at = new Date().toISOString();
+        transaction.verified_by = 'API';
+        updateStats(db.db);
+        return {
+            success: true,
+            matched_records: 1,
+            transaction_id: transaction.transaction_id,
+            message: 'Transaction verified and marked as COMPLETED',
+            status: 'COMPLETED'
+        };
+    } else {
+        return {
+            success: false,
+            error: 'NO_MATCH',
+            message: 'No matching PENDING transaction found'
+        };
+    }
+}
+
+async function getStatistics(db) {
+    if (db.type !== 'memory') {
+        return {
             total_transactions: 0,
             today_transactions: 0,
             total_amount: '0.00',
+            service_distribution: [],
+            recent_transactions: [],
             pending_transactions: 0,
-            completed_transactions: 0,
-            service_distribution: {}
-        }
-    };
-}
-
-function writeDatabase(db) {
-    try {
-        // Update stats before saving
-        updateStats(db);
-        fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
-        return true;
-    } catch (error) {
-        console.error('Error writing database:', error);
-        return false;
+            completed_transactions: 0
+        };
     }
+    
+    updateStats(db.db);
+    
+    const serviceDistArray = Object.entries(db.db.stats.service_distribution)
+        .map(([service_type, count]) => ({ service_type, count }))
+        .sort((a, b) => b.count - a.count);
+
+    const recentTransactions = db.db.transactions.slice(0, 50);
+
+    return {
+        total_transactions: db.db.stats.total_transactions,
+        today_transactions: db.db.stats.today_transactions,
+        total_amount: db.db.stats.total_amount,
+        service_distribution: serviceDistArray,
+        recent_transactions: recentTransactions,
+        pending_transactions: db.db.stats.pending_transactions,
+        completed_transactions: db.db.stats.completed_transactions
+    };
 }
 
 function updateStats(db) {
@@ -189,147 +370,18 @@ function updateStats(db) {
     };
 }
 
-async function saveTransaction(transactionData) {
-    const db = readDatabase();
-    
-    // Check for duplicate
-    if (transactionData.transaction_id) {
-        const existing = db.transactions.find(t => 
-            t.transaction_id === transactionData.transaction_id
-        );
-        if (existing) {
-            return existing;
+async function clearDatabase() {
+    memoryDB = {
+        transactions: [],
+        backup_sms: [],
+        stats: {
+            total_transactions: 0,
+            today_transactions: 0,
+            total_amount: '0.00',
+            pending_transactions: 0,
+            completed_transactions: 0,
+            service_distribution: {}
         }
-    }
-    
-    const newTransaction = {
-        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-        sender: transactionData.sender || '',
-        amount: transactionData.amount || '',
-        transaction_id: transactionData.transaction_id || '',
-        account_number: transactionData.account_number || '',
-        reference: transactionData.reference || '',
-        service_type: transactionData.service_type || 'Other',
-        transaction_type: transactionData.transaction_type || 'Unknown',
-        timestamp: new Date().toISOString(),
-        sim_info: transactionData.sim_info || '',
-        original_message: transactionData.original_message || '',
-        ip_address: transactionData.ip_address || '0.0.0.0',
-        status: 'PENDING',
-        verified_at: null,
-        verified_by: null
     };
-    
-    db.transactions.unshift(newTransaction);
-    writeDatabase(db);
-    return newTransaction;
-}
-
-async function saveBackupSMS(smsData) {
-    const db = readDatabase();
-    db.backup_sms.unshift({
-        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-        sms_data: smsData,
-        timestamp: new Date().toISOString(),
-        ip_address: '0.0.0.0'
-    });
-    if (db.backup_sms.length > 100) db.backup_sms.pop();
-    writeDatabase(db);
     return true;
 }
-
-async function verifyTransaction(service, amount, txid) {
-    const db = readDatabase();
-    const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')).toString();
-
-    const transaction = db.transactions.find(t => 
-        t.status === 'PENDING' &&
-        t.service_type?.toLowerCase() === service.toLowerCase() &&
-        t.transaction_id === txid &&
-        parseFloat(t.amount?.toString().replace(/[^0-9.]/g, '') || '0').toString() === cleanAmount
-    );
-
-    if (transaction) {
-        transaction.status = 'COMPLETED';
-        transaction.verified_at = new Date().toISOString();
-        transaction.verified_by = 'API';
-        writeDatabase(db);
-        return {
-            success: true,
-            matched_records: 1,
-            message: 'Transaction verified and marked as COMPLETED',
-            status: 'COMPLETED'
-        };
-    } else {
-        const existing = db.transactions.find(t => 
-            t.service_type?.toLowerCase() === service.toLowerCase() &&
-            t.transaction_id === txid
-        );
-
-        if (existing) {
-            return {
-                success: false,
-                error: 'TRANSACTION_NOT_PENDING',
-                message: 'Transaction found but not in PENDING state',
-                status: existing.status
-            };
-        } else {
-            return {
-                success: false,
-                error: 'NO_MATCH',
-                message: 'No matching PENDING transaction found'
-            };
-        }
-    }
-}
-
-async function verifyTransactionWithoutTxid(service, amount) {
-    const db = readDatabase();
-    const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')).toString();
-
-    const transaction = db.transactions.find(t => 
-        t.status === 'PENDING' &&
-        t.service_type?.toLowerCase() === service.toLowerCase() &&
-        parseFloat(t.amount?.toString().replace(/[^0-9.]/g, '') || '0').toString() === cleanAmount
-    );
-
-    if (transaction) {
-        transaction.status = 'COMPLETED';
-        transaction.verified_at = new Date().toISOString();
-        transaction.verified_by = 'API';
-        writeDatabase(db);
-        return {
-            success: true,
-            matched_records: 1,
-            transaction_id: transaction.transaction_id,
-            message: 'Transaction verified and marked as COMPLETED',
-            status: 'COMPLETED'
-        };
-    } else {
-        return {
-            success: false,
-            error: 'NO_MATCH',
-            message: 'No matching PENDING transaction found'
-        };
-    }
-}
-
-async function getStatistics() {
-    const db = readDatabase();
-    
-    const serviceDistArray = Object.entries(db.stats.service_distribution)
-        .map(([service_type, count]) => ({ service_type, count }))
-        .sort((a, b) => b.count - a.count);
-
-    const recentTransactions = db.transactions.slice(0, 50);
-
-    return {
-        total_transactions: db.stats.total_transactions,
-        today_transactions: db.stats.today_transactions,
-        total_amount: db.stats.total_amount,
-        service_distribution: serviceDistArray,
-        recent_transactions: recentTransactions,
-        pending_transactions: db.stats.pending_transactions,
-        completed_transactions: db.stats.completed_transactions
-    };
-} 
