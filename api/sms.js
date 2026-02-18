@@ -1,118 +1,408 @@
-// ==================== SMS API ENDPOINT (LIFETIME STORAGE VERSION) ====================
+// ==================== SMS API ENDPOINT (FIXED - PERSISTENT STORAGE) ====================
 // File location: /api/sms.js
 
-import { MongoClient } from 'mongodb';
+import { createClient } from '@vercel/kv';
 
-const uri = process.env.MONGODB_URI; // 🔥 Add this in Vercel Environment Variables
-let client;
-let clientPromise;
+// Initialize KV client
+const kv = createClient({
+  url: process.env.KV_REST_API_URL,
+  token: process.env.KV_REST_API_TOKEN,
+});
 
-if (!global._mongoClientPromise) {
-    client = new MongoClient(uri);
-    global._mongoClientPromise = client.connect();
-}
-clientPromise = global._mongoClientPromise;
-
-async function getDB() {
-    const client = await clientPromise;
-    return client.db("sms_database");
-}
+// Default database structure
+const DEFAULT_DB = {
+  transactions: [],
+  backup_sms: [],
+  stats: {
+    total_transactions: 0,
+    today_transactions: 0,
+    total_amount: '0.00',
+    pending_transactions: 0,
+    completed_transactions: 0,
+    service_distribution: {}
+  }
+};
 
 export default async function handler(req, res) {
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
+  res.setHeader('Access-Control-Max-Age', '86400');
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
-    res.setHeader('Access-Control-Max-Age', '86400');
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+  console.log('🔥 Request received:', {
+    method: req.method,
+    query: req.query,
+    body: req.body
+  });
+
+  try {
+    // GET request for stats (browser testing)
+    if (req.method === 'GET' && req.query?.action === 'get_stats') {
+      const db = await getDatabase();
+      const stats = await getStatistics(db);
+      return res.status(200).json(stats);
     }
 
-    if (req.method !== 'POST' && !(req.method === 'GET' && req.query?.action === 'get_stats')) {
-        return res.status(400).json({ success: false, error: 'Invalid request method' });
+    // All other actions require POST
+    if (req.method !== 'POST') {
+      return res.status(200).json({
+        success: false,
+        error: 'Please use POST method',
+        method_received: req.method
+      });
     }
 
-    try {
+    // Get parameters
+    const action = req.body?.action || req.query?.action;
+    const data = req.body?.data || req.query?.data;
+    const sms_data = req.body?.sms_data || req.query?.sms_data;
+    const service = req.body?.service || req.query?.service;
+    const amount = req.body?.amount || req.query?.amount;
+    const txid = req.body?.txid || req.query?.txid;
 
-        const action = req.body?.action || req.query?.action;
-        const data = req.body?.data || req.query?.data;
-        const sms_data = req.body?.sms_data || req.query?.sms_data;
-        const service = req.body?.service || req.query?.service;
-        const amount = req.body?.amount || req.query?.amount;
-        const txid = req.body?.txid || req.query?.txid;
+    console.log('📦 Parsed parameters:', { action, data, sms_data, service, amount, txid });
 
-        const db = await getDB();
-        const transactions = db.collection("transactions");
-        const backup_sms = db.collection("backup_sms");
+    if (!action) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing action parameter'
+      });
+    }
 
-        switch(action) {
+    // Get database
+    const db = await getDatabase();
 
-            // ================= SAVE TRANSACTION =================
-            case 'save_transaction':
+    switch (action) {
+      case 'save_transaction':
+        if (!data) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing transaction data'
+          });
+        }
 
-                let transactionData = JSON.parse(decodeURIComponent(data));
+        let transactionData;
+        try {
+          transactionData = JSON.parse(decodeURIComponent(data));
+        } catch (e) {
+          try {
+            transactionData = JSON.parse(data);
+          } catch (e2) {
+            return res.status(400).json({
+              success: false,
+              error: 'Invalid JSON data'
+            });
+          }
+        }
 
-                const newTransaction = {
-                    ...transactionData,
-                    timestamp: new Date(),
-                    status: "PENDING",
-                    verified_at: null,
-                    verified_by: null
-                };
+        console.log('💾 Saving transaction:', transactionData);
+        const savedTransaction = await saveTransaction(db, transactionData);
 
-                await transactions.insertOne(newTransaction);
+        return res.status(200).json({
+          success: true,
+          message: '✅ Transaction saved successfully',
+          transaction_id: savedTransaction.transaction_id,
+          status: 'PENDING',
+          id: savedTransaction.id
+        });
 
-                return res.json({
-                    success: true,
-                    message: "✅ Transaction saved successfully",
-                    transaction_id: newTransaction.transaction_id,
-                    status: "PENDING"
-                });
+      case 'save_backup':
+        if (!sms_data) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing SMS data'
+          });
+        }
 
-            // ================= VERIFY PAYMENT =================
-            case 'verify_payment':
+        const decodedSms = decodeURIComponent(sms_data);
+        await saveBackupSMS(db, decodedSms);
+        return res.status(200).json({
+          success: true,
+          message: '✅ Backup SMS saved'
+        });
 
-                const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, ''));
+      case 'verify_payment':
+        if (!service || !amount || !txid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing service, amount or transaction ID'
+          });
+        }
 
-                const transaction = await transactions.findOne({
-                    status: "PENDING",
-                    service_type: { $regex: new RegExp("^" + service + "$", "i") },
-                    transaction_id: txid,
-                    amount: { $regex: cleanAmount.toString() }
-                });
+        const verification = await verifyTransaction(db, service, amount, txid);
+        return res.status(200).json(verification);
 
-                if (transaction) {
+      case 'verify_payment_without_txid':
+        if (!service || !amount) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing service or amount'
+          });
+        }
 
-                    await transactions.updateOne(
-                        { _id: transaction._id },
-                        {
-                            $set: {
-                                status: "COMPLETED",
-                                verified_at: new Date(),
-                                verified_by: "API"
-                            }
-                        }
-                    );
+        const verificationNoTxid = await verifyTransactionWithoutTxid(db, service, amount);
+        return res.status(200).json(verificationNoTxid);
 
-                    return res.json({
-                        success: true,
-                        matched_records: 1,
-                        message: "✅ Transaction verified and marked as COMPLETED",
-                        status: "COMPLETED"
-                    });
-                }
+      case 'get_stats':
+        const stats = await getStatistics(db);
+        return res.status(200).json(stats);
 
-                const existing = await transactions.findOne({
-                    service_type: { $regex: new RegExp("^" + service + "$", "i") },
-                    transaction_id: txid
-                });
+      case 'clear_database':
+        await clearDatabase();
+        return res.status(200).json({
+          success: true,
+          message: '✅ Database cleared successfully'
+        });
 
-                if (existing) {
-                    return res.json({
-                        success: false,
-                        error: "TRANSACTION_NOT_PENDING",
-                        status: existing.status
+      default:
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid action',
+          valid_actions: [
+            'save_transaction',
+            'save_backup',
+            'verify_payment',
+            'verify_payment_without_txid',
+            'get_stats',
+            'clear_database'
+          ]
+        });
+    }
+  } catch (error) {
+    console.error('❌ API Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error: ' + error.message
+    });
+  }
+}
+
+// ==================== DATABASE FUNCTIONS (PERSISTENT) ====================
+
+// Get database from KV storage
+async function getDatabase() {
+  try {
+    const db = await kv.get('sms_database');
+    if (!db) {
+      console.log('📀 Creating new database...');
+      await kv.set('sms_database', DEFAULT_DB);
+      return DEFAULT_DB;
+    }
+    console.log('✅ Database loaded with', db.transactions?.length || 0, 'transactions');
+    return db;
+  } catch (error) {
+    console.error('❌ Error getting database:', error);
+    return DEFAULT_DB;
+  }
+}
+
+// Save database to KV storage
+async function saveDatabase(db) {
+  try {
+    await kv.set('sms_database', db);
+    return true;
+  } catch (error) {
+    console.error('❌ Error saving database:', error);
+    return false;
+  }
+}
+
+// Save transaction
+async function saveTransaction(db, transactionData) {
+  const newTransaction = {
+    id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+    sender: transactionData.sender || '',
+    amount: transactionData.amount || '',
+    transaction_id: transactionData.transaction_id || '',
+    account_number: transactionData.account_number || '',
+    reference: transactionData.reference || '',
+    service_type: transactionData.service_type || 'Other',
+    transaction_type: transactionData.transaction_type || 'Unknown',
+    timestamp: new Date().toISOString(),
+    sim_info: transactionData.sim_info || '',
+    original_message: transactionData.original_message || '',
+    status: 'PENDING',
+    verified_at: null,
+    verified_by: null
+  };
+
+  db.transactions.unshift(newTransaction);
+  updateStats(db);
+  await saveDatabase(db);
+  
+  console.log('✅ Transaction saved. Total:', db.transactions.length);
+  return newTransaction;
+}
+
+// Save backup SMS
+async function saveBackupSMS(db, smsData) {
+  db.backup_sms.unshift({
+    id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+    sms_data: smsData,
+    timestamp: new Date().toISOString()
+  });
+  
+  if (db.backup_sms.length > 100) db.backup_sms.pop();
+  await saveDatabase(db);
+  console.log('✅ Backup SMS saved');
+  return true;
+}
+
+// Verify transaction with TXID
+async function verifyTransaction(db, service, amount, txid) {
+  const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')).toString();
+
+  // Find PENDING transaction
+  const transaction = db.transactions.find(t =>
+    t.status === 'PENDING' &&
+    t.service_type?.toLowerCase() === service.toLowerCase() &&
+    t.transaction_id === txid &&
+    parseFloat(t.amount?.toString().replace(/[^0-9.]/g, '') || '0').toString() === cleanAmount
+  );
+
+  if (transaction) {
+    transaction.status = 'COMPLETED';
+    transaction.verified_at = new Date().toISOString();
+    transaction.verified_by = 'API';
+    
+    updateStats(db);
+    await saveDatabase(db);
+    
+    return {
+      success: true,
+      matched_records: 1,
+      message: '✅ Transaction verified and marked as COMPLETED',
+      status: 'COMPLETED'
+    };
+  }
+
+  // Check if exists but not PENDING
+  const existing = db.transactions.find(t =>
+    t.service_type?.toLowerCase() === service.toLowerCase() &&
+    t.transaction_id === txid
+  );
+
+  if (existing) {
+    return {
+      success: false,
+      error: 'TRANSACTION_NOT_PENDING',
+      message: 'Transaction found but not in PENDING state',
+      status: existing.status
+    };
+  }
+
+  return {
+    success: false,
+    error: 'NO_MATCH',
+    message: '❌ No matching PENDING transaction found'
+  };
+}
+
+// Verify transaction without TXID
+async function verifyTransactionWithoutTxid(db, service, amount) {
+  const cleanAmount = parseFloat(amount.toString().replace(/[^0-9.]/g, '')).toString();
+
+  // Find most recent PENDING transaction
+  const transaction = db.transactions.find(t =>
+    t.status === 'PENDING' &&
+    t.service_type?.toLowerCase() === service.toLowerCase() &&
+    parseFloat(t.amount?.toString().replace(/[^0-9.]/g, '') || '0').toString() === cleanAmount
+  );
+
+  if (transaction) {
+    transaction.status = 'COMPLETED';
+    transaction.verified_at = new Date().toISOString();
+    transaction.verified_by = 'API';
+    
+    updateStats(db);
+    await saveDatabase(db);
+    
+    return {
+      success: true,
+      matched_records: 1,
+      transaction_id: transaction.transaction_id,
+      message: '✅ Transaction verified and marked as COMPLETED',
+      status: 'COMPLETED'
+    };
+  }
+
+  return {
+    success: false,
+    error: 'NO_MATCH',
+    message: '❌ No matching PENDING transaction found'
+  };
+}
+
+// Get statistics
+async function getStatistics(db) {
+  updateStats(db);
+  
+  const serviceDistArray = Object.entries(db.stats.service_distribution || {})
+    .map(([service_type, count]) => ({ service_type, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const recentTransactions = db.transactions.slice(0, 50);
+
+  return {
+    total_transactions: db.stats.total_transactions || 0,
+    today_transactions: db.stats.today_transactions || 0,
+    total_amount: db.stats.total_amount || '0.00',
+    service_distribution: serviceDistArray,
+    recent_transactions: recentTransactions,
+    pending_transactions: db.stats.pending_transactions || 0,
+    completed_transactions: db.stats.completed_transactions || 0
+  };
+}
+
+// Update statistics
+function updateStats(db) {
+  const today = new Date().toDateString();
+  let totalAmount = 0;
+  let pendingCount = 0;
+  let completedCount = 0;
+  let todayCount = 0;
+  let serviceDist = {};
+
+  db.transactions.forEach(t => {
+    if (t.status === 'PENDING') pendingCount++;
+    else if (t.status === 'COMPLETED') completedCount++;
+
+    if (new Date(t.timestamp).toDateString() === today) {
+      todayCount++;
+    }
+
+    if (t.status === 'COMPLETED' && t.amount) {
+      const amt = parseFloat(t.amount.toString().replace(/[^0-9.]/g, ''));
+      if (!isNaN(amt)) totalAmount += amt;
+    }
+
+    if (t.status === 'COMPLETED' && t.service_type) {
+      serviceDist[t.service_type] = (serviceDist[t.service_type] || 0) + 1;
+    }
+  });
+
+  db.stats = {
+    total_transactions: db.transactions.length,
+    today_transactions: todayCount,
+    total_amount: totalAmount.toFixed(2),
+    pending_transactions: pendingCount,
+    completed_transactions: completedCount,
+    service_distribution: serviceDist
+  };
+}
+
+// Clear database
+async function clearDatabase() {
+  await kv.set('sms_database', DEFAULT_DB);
+  console.log('✅ Database cleared');
+  return true;
+}                        status: existing.status
                     });
                 }
 
