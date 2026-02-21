@@ -1,4 +1,4 @@
-// ==================== SMS API ENDPOINT (100% FIXED - NO AUTO CLEAR) ====================
+// ==================== SMS API ENDPOINT (100% FIXED - NO AUTO CLEAR, NO DELETE) ====================
 // File location: /api/sms.js
 
 export default async function handler(req, res) {
@@ -141,6 +141,7 @@ export default async function handler(req, res) {
                 return res.status(200).json(stats);
 
             case 'clear_database':
+                // 🔒 FIX: Clear database only when explicitly called
                 await clearDatabase();
                 return res.status(200).json({ 
                     success: true, 
@@ -171,13 +172,46 @@ export default async function handler(req, res) {
 }
 
 // ==================== DATABASE FUNCTIONS ====================
+// 🔒 FIX: Use global object for Vercel persistence
 let memoryDB = null;
-let isInitialized = false;
+
+// 🔒 FIX: Prevent any auto-clear or auto-delete
+const GLOBAL_STORAGE = {};
+
+try {
+    // Try to use global object for better persistence in serverless
+    if (typeof global !== 'undefined') {
+        if (!global.__sms_api_database) {
+            global.__sms_api_database = {
+                transactions: [],
+                backup_sms: [],
+                stats: {
+                    total_transactions: 0,
+                    today_transactions: 0,
+                    total_amount: '0.00',
+                    pending_transactions: 0,
+                    completed_transactions: 0,
+                    service_distribution: {}
+                }
+            };
+            console.log('✅ Global database created');
+        }
+        memoryDB = global.__sms_api_database;
+    }
+} catch (e) {
+    console.log('Global storage not available, using local variable');
+}
 
 async function initDatabase() {
     console.log('📀 Initializing database...');
     
-    // শুধু প্রথমবার ডাটাবেজ ক্রিয়েট হবে, এরপর আর ক্লিয়ার হবে না
+    // 🔒 FIX: Use global storage if available
+    if (typeof global !== 'undefined' && global.__sms_api_database) {
+        console.log('✅ Using global database with', global.__sms_api_database.transactions.length, 'transactions');
+        return { type: 'memory', db: global.__sms_api_database };
+    }
+    
+    // Fallback to local memoryDB
     if (!memoryDB) {
         memoryDB = {
             transactions: [],
@@ -191,12 +225,11 @@ async function initDatabase() {
                 service_distribution: {}
             }
         };
-        console.log('✅ New database created');
+        console.log('✅ New local database created');
     } else {
-        console.log('✅ Using existing database with', memoryDB.transactions.length, 'transactions');
+        console.log('✅ Using existing local database with', memoryDB.transactions.length, 'transactions');
     }
     
-    isInitialized = true;
     return { type: 'memory', db: memoryDB };
 }
 
@@ -220,7 +253,14 @@ async function saveTransaction(db, transactionData) {
     };
     
     if (db.type === 'memory') {
-        db.db.transactions.unshift(newTransaction);
+        // 🔒 FIX: Simply add to array - NO AUTO CLEAR, NO LIMIT
+        db.db.transactions.push(newTransaction);
+        
+        // 🔒 FIX: Also update global if available
+        if (typeof global !== 'undefined' && global.__sms_api_database) {
+            global.__sms_api_database.transactions.push(newTransaction);
+        }
+        
         updateStats(db.db);
         console.log('✅ Transaction saved. Total:', db.db.transactions.length);
     }
@@ -230,14 +270,25 @@ async function saveTransaction(db, transactionData) {
 
 async function saveBackupSMS(db, smsData) {
     if (db.type === 'memory') {
-        db.db.backup_sms.unshift({
+        // 🔒 FIX: Simply add to array - NO AUTO CLEAR, NO LIMIT
+        db.db.backup_sms.push({
             id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
             sms_data: smsData,
             timestamp: new Date().toISOString(),
             ip_address: '0.0.0.0'
         });
-        if (db.db.backup_sms.length > 100) db.db.backup_sms.pop();
-        console.log('✅ Backup SMS saved');
+        
+        // 🔒 FIX: Update global if available
+        if (typeof global !== 'undefined' && global.__sms_api_database) {
+            global.__sms_api_database.backup_sms.push({
+                id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+                sms_data: smsData,
+                timestamp: new Date().toISOString(),
+                ip_address: '0.0.0.0'
+            });
+        }
+        
+        console.log('✅ Backup SMS saved. Total backup SMS:', db.db.backup_sms.length);
     }
     return true;
 }
@@ -258,6 +309,17 @@ async function verifyTransaction(db, service, amount, txid) {
         transaction.status = 'COMPLETED';
         transaction.verified_at = new Date().toISOString();
         transaction.verified_by = 'API';
+        
+        // 🔒 FIX: Update in global if available
+        if (typeof global !== 'undefined' && global.__sms_api_database) {
+            const globalTx = global.__sms_api_database.transactions.find(t => t.id === transaction.id);
+            if (globalTx) {
+                globalTx.status = 'COMPLETED';
+                globalTx.verified_at = transaction.verified_at;
+                globalTx.verified_by = transaction.verified_by;
+            }
+        }
+        
         updateStats(db.db);
         return {
             success: true,
@@ -303,6 +365,17 @@ async function verifyTransactionWithoutTxid(db, service, amount) {
         transaction.status = 'COMPLETED';
         transaction.verified_at = new Date().toISOString();
         transaction.verified_by = 'API';
+        
+        // 🔒 FIX: Update in global if available
+        if (typeof global !== 'undefined' && global.__sms_api_database) {
+            const globalTx = global.__sms_api_database.transactions.find(t => t.id === transaction.id);
+            if (globalTx) {
+                globalTx.status = 'COMPLETED';
+                globalTx.verified_at = transaction.verified_at;
+                globalTx.verified_by = transaction.verified_by;
+            }
+        }
+        
         updateStats(db.db);
         return {
             success: true,
@@ -339,7 +412,8 @@ async function getStatistics(db) {
         .map(([service_type, count]) => ({ service_type, count }))
         .sort((a, b) => b.count - a.count);
 
-    const recentTransactions = db.db.transactions.slice(0, 50);
+    // 🔒 FIX: Return ALL transactions, not limited to 50
+    const recentTransactions = db.db.transactions;
 
     return {
         total_transactions: db.db.stats.total_transactions,
@@ -348,7 +422,14 @@ async function getStatistics(db) {
         service_distribution: serviceDistArray,
         recent_transactions: recentTransactions,
         pending_transactions: db.db.stats.pending_transactions,
-        completed_transactions: db.db.stats.completed_transactions
+        completed_transactions: db.db.stats.completed_transactions,
+        // 🔒 FIX: Add metadata to confirm no auto-clear
+        database_info: {
+            total_records: db.db.transactions.length,
+            backup_sms_count: db.db.backup_sms.length,
+            auto_clear_disabled: true,
+            max_limit_removed: true
+        }
     };
 }
 
@@ -389,8 +470,10 @@ function updateStats(db) {
 }
 
 async function clearDatabase() {
-    // এই ফাংশন শুধু explicit কল করলেই কাজ করবে
-    // auto-clear হবে না
+    // 🔒 FIX: This function ONLY works when explicitly called with 'clear_database' action
+    // NEVER auto-clears
+    
+    // Clear local memoryDB
     memoryDB = {
         transactions: [],
         backup_sms: [],
@@ -403,6 +486,25 @@ async function clearDatabase() {
             service_distribution: {}
         }
     };
-    console.log('✅ Database cleared manually');
+    
+    // Clear global if available
+    if (typeof global !== 'undefined') {
+        if (global.__sms_api_database) {
+            global.__sms_api_database = {
+                transactions: [],
+                backup_sms: [],
+                stats: {
+                    total_transactions: 0,
+                    today_transactions: 0,
+                    total_amount: '0.00',
+                    pending_transactions: 0,
+                    completed_transactions: 0,
+                    service_distribution: {}
+                }
+            };
+        }
+    }
+    
+    console.log('✅ Database cleared manually via clear_database action');
     return true;
-}
+} 
